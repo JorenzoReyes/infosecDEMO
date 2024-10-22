@@ -1,0 +1,1 @@
+cursor = conn.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
