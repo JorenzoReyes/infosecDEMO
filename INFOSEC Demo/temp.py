@@ -1,5 +1,6 @@
 from flask import Flask, request, render_template_string, redirect, session
 import sqlite3
+import bcrypt
 
 app = Flask(__name__)
 app.secret_key = 'secret'
@@ -35,9 +36,15 @@ def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
+
+        encodedPW = password.encode('utf-8')
+        salt = bcrypt.gensalt(rounds=15)
+        # Hash the password using bcrypt
+        hashed_password = bcrypt.hashpw(encodedPW, salt)
+        
         conn = get_db_connection()
         
-        conn.execute(f"INSERT INTO users (username, password) VALUES ('{username}', '{password}'")
+        conn.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
         conn.commit()
         conn.close()
         return redirect('/login')
@@ -55,14 +62,16 @@ def register():
 def login():
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password']
+        password = request.form['password'].encode('utf-8')  # Encode password to bytes
+
+        # Hash the password using bcrypt
         conn = get_db_connection()
         
-        cursor = conn.execute(f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'")
+        cursor = conn.execute("SELECT * FROM users WHERE username = ?", (username,))
         user = cursor.fetchone()
         conn.close()
-
-        if user:
+        
+        if bcrypt.checkpw(password, user[2]):
             session['username'] = user[1]
             return redirect('/')
         else:
