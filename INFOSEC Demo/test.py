@@ -1,27 +1,33 @@
 from flask import Flask, request, render_template_string, redirect, session
 import sqlite3
 import re
+import bcrypt
 
 app = Flask(__name__)
 app.secret_key = 'secret'
 
 # Connect to the database
 def get_db_connection():
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect('regex.db')
     return conn
 
-# Create the users table
+# Create the users table with constraints
 def init_db():
     conn = get_db_connection()
     conn.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            password TEXT NOT NULL
+            username TEXT NOT NULL,  
+            password TEXT NOT NULL  
         )
     ''')
     conn.commit()
     conn.close()
+
+# Function to validate credentials
+def is_valid_credentials(username):
+    special_char_pattern = re.compile(r'[^a-zA-Z0-9]')
+    return not (special_char_pattern.search(username))
 
 # Home route
 @app.route('/')
@@ -42,13 +48,19 @@ def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        conn = get_db_connection()
-
-        #vulnerable to: testuser' , 'password'); DROP TABLE users;-- 
         
-        conn.executescript(f"INSERT INTO users (username, password) VALUES ('{username}', '{password}')")
+        
+        # Validate credentials
+        if not is_valid_credentials(username):
+            return 'Special characters are not allowed in username.<br><a href="/register">Go back</a>'
+        
+        encoded_password = password.encode('utf-8')
+        salt = bcrypt.gensalt(rounds=15)
+        hashed_password = bcrypt.hashpw(encoded_password, salt)
+
+        conn = get_db_connection()
+        conn.executescript(f"INSERT INTO users (username, password) VALUES ('{username}', '{hashed_password}')")
         conn.commit()
-        conn.close()
         return redirect('/login')
     
     return render_template_string('''
@@ -64,16 +76,19 @@ def register():
 def login():
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password']
-        conn = get_db_connection()
+        password = request.form['password']  # Encode password to bytes
         
-        #vulnerable to: ' OR '1'='1, test' OR '1'='1, test'--;
+        # Validate credentials
+        if not is_valid_credentials(username):
+            return 'Special characters are not allowed in username.<br><a href="/login">Go back</a>'
 
-        query = conn.execute(f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'")
-        user = query.fetchone()
+        encoded_password = password.encode('utf-8')
+        conn = get_db_connection()
+        cursor = conn.execute(f"SELECT * FROM users WHERE username = ?", (username,))
+        user = cursor.fetchone()
         conn.close()
 
-        if user:
+        if bcrypt.checkpw(encoded_password, user[2]):
             session['username'] = user[1]
             if user[1] == 'admin':
                 return redirect('/')

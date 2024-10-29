@@ -1,13 +1,13 @@
 from flask import Flask, request, render_template_string, redirect, session
 import sqlite3
-import re
+import bcrypt
 
 app = Flask(__name__)
 app.secret_key = 'secret'
 
 # Connect to the database
 def get_db_connection():
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect('hash.db')
     return conn
 
 # Create the users table
@@ -30,23 +30,20 @@ def home():
         return f'Welcome, {session["username"]}! <a href="/logout">Logout</a>| <a href="/db">DB</a>'  
     return 'Welcome! <a href="/login">Login</a> | <a href="/register">Register</a>'
 
-@app.route('/user')
-def user():
-    if 'username' in session:
-        return f'Welcome, {session["username"]}! <a href="/logout">Logout</a>'
-    return 'Welcome! <a href="/login">Login</a> | <a href="/register">Register</a>'
-
 # Registration page
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        conn = get_db_connection()
 
-        #vulnerable to: testuser' , 'password'); DROP TABLE users;-- 
+        encodedPW = password.encode('utf-8')
+        salt = bcrypt.gensalt(rounds=15)
+        hashed_password = bcrypt.hashpw(encodedPW, salt)
         
-        conn.executescript(f"INSERT INTO users (username, password) VALUES ('{username}', '{password}')")
+        conn = get_db_connection()
+        
+        conn.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
         conn.commit()
         conn.close()
         return redirect('/login')
@@ -64,29 +61,25 @@ def register():
 def login():
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password']
+        password = request.form['password'].encode('utf-8')  # Encode password to bytes
+
         conn = get_db_connection()
         
-        #vulnerable to: ' OR '1'='1, test' OR '1'='1, test'--;
-
-        query = conn.execute(f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'")
+        query = conn.execute("SELECT * FROM users WHERE username = ?", (username,))
         user = query.fetchone()
         conn.close()
-
-        if user:
+        
+        if bcrypt.checkpw(password, user[2]):
             session['username'] = user[1]
-            if user[1] == 'admin':
-                return redirect('/')
-            else:
-                return redirect('/user')
+            return redirect('/')
         else:
             return 'Invalid credentials! <a href="/login">Login</a>'
     
     return render_template_string('''
         <form method="POST">
             Username: <input type="text" name="username"><br>
-            Password: <input type="password" name="password"><br>
-            <input type="submit" value="Login"> | <a href="/register">Register</a>
+            Password: <input type="text" name="password"><br>
+            <input type="submit" value="Login">
         </form>
     ''')
 
